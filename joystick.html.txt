@@ -3,6 +3,3 @@
         <div id="joystick-knob"></div>
     </div>
 </div>
-<div id="attack-btn-zone">
-    <div id="attack-btn"></div>
-</div>
