@@ -7,7 +7,6 @@ PlayerMovement.prototype.initialize = function() {
     this.moveDir = new pc.Vec3();
     this.joystickInput = new pc.Vec2();
     
-    // 註冊搖桿監聽器
     this.app.on('joystick:move', this.onJoystickMove, this);
     this.app.on('joystick:end', this.onJoystickEnd, this);
 };
@@ -23,11 +22,15 @@ PlayerMovement.prototype.onJoystickEnd = function() {
 PlayerMovement.prototype.update = function(dt) {
     if (!this.entity.rigidbody) return;
 
+    this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
+
     var currentVelocity = this.entity.rigidbody.linearVelocity;
+    
+    // 關鍵修正 1：防止 Y 軸重力無限累積導致物理引擎吃掉水平移動速度
+    var safeYVelocity = Math.max(currentVelocity.y, -10);
 
     if (this.joystickInput.lengthSq() > 0 && this.cameraEntity) {
         
-        // 新增：取得搖桿推動的力度，最大限制為 1.0
         var pushStrength = Math.min(this.joystickInput.length(), 1.0);
 
         var camForward = this.cameraEntity.forward.clone();
@@ -41,31 +44,28 @@ PlayerMovement.prototype.update = function(dt) {
         var moveForward = camForward.mulScalar(-this.joystickInput.y);
         var moveRight = camRight.mulScalar(this.joystickInput.x);
 
-        // 每次更新前先歸零
         this.moveDir.set(0, 0, 0);
         this.moveDir.add2(moveForward, moveRight);
         
         if (this.moveDir.lengthSq() > 0.001) {
-            // 取得純粹的前進方向
             this.moveDir.normalize();
             
-            // 新增：當前的實際速度 = 最大速度 * 搖桿推力
             var currentSpeed = this.speed * pushStrength;
             
-            // 設定剛體的線性速度 (套用計算後的實際速度)
             var targetVelocity = new pc.Vec3(
                 this.moveDir.x * currentSpeed,
-                currentVelocity.y,
+                safeYVelocity,
                 this.moveDir.z * currentSpeed
             );
             this.entity.rigidbody.linearVelocity = targetVelocity;
             
-            // 讓角色轉向面向前進方向 (轉向不受力度影響)
             var targetPos = new pc.Vec3().add2(this.entity.getPosition(), this.moveDir);
             this.entity.lookAt(targetPos);
+            
+            // 關鍵修正 2：移除 teleport，不再干擾物理引擎的碰撞結算
         }
     } else {
-        // 放開搖桿時，水平速度歸零
-        this.entity.rigidbody.linearVelocity = new pc.Vec3(0, currentVelocity.y, 0);
+        // 放開搖桿時，水平速度歸零，但保持安全的 Y 軸速度
+        this.entity.rigidbody.linearVelocity = new pc.Vec3(0, safeYVelocity, 0);
     }
 };

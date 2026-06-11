@@ -1,0 +1,3 @@
+<div id="attack-btn-zone">
+    <div id="attack-btn"></div>
+</div>
