@@ -12,22 +12,37 @@ AttackButton.prototype.initialize = function() {
     this.div.innerHTML = this.html.resource || '';
     document.body.appendChild(this.div);
 
-    this.btnZone = document.getElementById('attack-btn-zone');
-    this.btn = document.getElementById('attack-btn');
-    this.btn.innerText = "普攻";
+    // 取得所有按鍵 DOM 元素
+    this.btnAttack = document.getElementById('attack-btn');
+    this.btnSkillA = document.getElementById('skill-a-btn');
+    this.btnSkillB = document.getElementById('skill-b-btn');
+    this.btnSkillC = document.getElementById('skill-c-btn');
 
     this.bindEvents();
 };
 
 AttackButton.prototype.bindEvents = function() {
-    this.btnZone.addEventListener('touchstart', this.onAttack.bind(this), { passive: false });
-    this.btnZone.addEventListener('mousedown', this.onAttack.bind(this));
+    // 綁定普攻 (ID: basic_attack)
+    this.btnAttack.addEventListener('touchstart', this.onCastSkill.bind(this, 'basic_attack'), { passive: false });
+    this.btnAttack.addEventListener('mousedown', this.onCastSkill.bind(this, 'basic_attack'));
+
+    // 綁定技能 A: 三連擊 (ID: combo_attack)
+    this.btnSkillA.addEventListener('touchstart', this.onCastSkill.bind(this, 'combo_attack'), { passive: false });
+    this.btnSkillA.addEventListener('mousedown', this.onCastSkill.bind(this, 'combo_attack'));
+
+    // 綁定技能 B: 突進斬 (ID: dash_slash)
+    this.btnSkillB.addEventListener('touchstart', this.onCastSkill.bind(this, 'dash_slash'), { passive: false });
+    this.btnSkillB.addEventListener('mousedown', this.onCastSkill.bind(this, 'dash_slash'));
+
+    // 綁定技能 C: 旋風斬 (ID: whirlwind)
+    this.btnSkillC.addEventListener('touchstart', this.onCastSkill.bind(this, 'whirlwind'), { passive: false });
+    this.btnSkillC.addEventListener('mousedown', this.onCastSkill.bind(this, 'whirlwind'));
 };
 
-AttackButton.prototype.onAttack = function(e) {
+AttackButton.prototype.onCastSkill = function(skillId, e) {
     e.preventDefault();
     e.stopPropagation();
     
-    // 發送技能釋放事件，指定技能 ID 為 basic_attack
-    this.app.fire('skill:cast', 'basic_attack');
+    // 將對應的技能 ID 傳送給系統
+    this.app.fire('skill:cast', skillId);
 };

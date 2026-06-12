@@ -72,6 +72,78 @@
                     "damage_time": 0.6
                 }
             ]
+        },"combo_attack": {
+            "name": "三連擊",
+            "eligible_classes": ["warrior"],
+            "cast_time": 0.9,
+            "recovery_time": 0.3,
+            "vfx_effect": "vfx_combo",
+            "stat_scaling": {
+                "strength": 0.1,
+                "hp": 0.0,
+                "defense": 0.0,
+                "spirit": 0.0
+            },
+            "range_shapes": [
+                {
+                    "shape_type": "fan", "offset": { "x": 0, "z": 0 }, "radius": 3.0, "angle": 180, "damage_time": 0.2
+                },
+                {
+                    "shape_type": "fan", "offset": { "x": 0, "z": 0 }, "radius": 3.0, "angle": 180, "damage_time": 0.5
+                },
+                {
+                    "shape_type": "fan", "offset": { "x": 0, "z": 0 }, "radius": 3.0, "angle": 180, "damage_time": 0.8, "knockback": 6
+                }
+            ]
+        },
+        "dash_slash": {
+            "name": "突進斬",
+            "eligible_classes": ["warrior"],
+            "cast_time": 0.3,
+            "recovery_time": 0.4,
+            "vfx_effect": "vfx_dash",
+            "stat_scaling": {
+                "strength": 0.3,
+                "hp": 0.0,
+                "defense": 0.0,
+                "spirit": 0.0
+            },
+            "player_movement": {
+                "start_time": 0.0,
+                "duration": 0.2,
+                "speed": 15
+            },
+            "range_shapes": [
+                {
+                    "shape_type": "box",
+                    "offset": { "x": 0, "z": -2.0 },
+                    "dimensions": { "width": 2.0, "length": 4.0 },
+                    "damage_time": 0.2
+                }
+            ]
+        },
+        "whirlwind": {
+            "name": "旋風斬",
+            "eligible_classes": ["warrior"],
+            "cast_time": 0.3,
+            "recovery_time": 0.5,
+            "vfx_effect": "vfx_tornado",
+            "stat_scaling": {
+                "strength": 0.1,
+                "hp": 0.0,
+                "defense": 0.0,
+                "spirit": 0.0
+            },
+            "projectiles": [
+                {
+                    "shape_type": "circle",
+                    "radius": 2.0,
+                    "speed": 4.0,
+                    "duration": 3.0,
+                    "tick_rate": 0.5,
+                    "spawn_time": 0.3
+                }
+            ]
         }
     },
     "monsters": {

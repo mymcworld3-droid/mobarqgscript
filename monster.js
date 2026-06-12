@@ -27,10 +27,10 @@ Monster.prototype.initialize = function() {
 };
 
 Monster.prototype.createHpBar = function() {
-    // 1. 動態注入血條的 CSS 樣式 (若場景中有多隻怪，此樣式只會注入一次)
-    if (!document.getElementById('hp-bar-style')) {
+    // 動態注入血條與傷害數字的 CSS 樣式
+    if (!document.getElementById('monster-ui-style')) {
         var style = document.createElement('style');
-        style.id = 'hp-bar-style';
+        style.id = 'monster-ui-style';
         style.innerHTML = `
             .hp-bar-bg {
                 position: absolute;
@@ -51,11 +51,27 @@ Monster.prototype.createHpBar = function() {
                 border-radius: 2px;
                 transition: width 0.1s ease-out;
             }
+            /* 新增：傷害數字跳字動畫與樣式 */
+            @keyframes damageFloat {
+                0% { opacity: 1; transform: translate(-50%, -50%) scale(1.5); }
+                100% { opacity: 0; transform: translate(-50%, -150%) scale(1); }
+            }
+            .damage-text {
+                position: absolute;
+                color: #ff3333;
+                font-size: 24px;
+                font-weight: bold;
+                font-family: sans-serif;
+                text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+                pointer-events: none;
+                z-index: 10;
+                animation: damageFloat 0.8s ease-out forwards;
+            }
         `;
         document.head.appendChild(style);
     }
 
-    // 2. 建立血條的 DOM 結構
+    // 建立血條的 DOM 結構
     this.hpBg = document.createElement('div');
     this.hpBg.className = 'hp-bar-bg';
     
@@ -65,11 +81,9 @@ Monster.prototype.createHpBar = function() {
     this.hpBg.appendChild(this.hpFill);
     document.body.appendChild(this.hpBg);
 
-    // 預配置向量，避免在 update 中重複 new 造成記憶體回收負擔
     this.screenPos = new pc.Vec3();
     this.monsterPos = new pc.Vec3();
 
-    // 3. 安全機制：確保此 Entity 被刪除時，對應的 HTML 血條也會被拔除
     this.on('destroy', function() {
         if (this.hpBg && this.hpBg.parentNode) {
             this.hpBg.parentNode.removeChild(this.hpBg);
@@ -80,15 +94,12 @@ Monster.prototype.createHpBar = function() {
 Monster.prototype.update = function(dt) {
     if (!this.cameraEntity || !this.hpBg) return;
 
-    // 取得當前怪物在 3D 世界的位置，並向上延伸到頭頂
     this.monsterPos.copy(this.entity.getPosition());
     this.monsterPos.y += this.hpBarHeight;
 
-    // 將 3D 世界座標投影轉換至 2D 螢幕座標
     var cameraComponent = this.cameraEntity.camera;
     cameraComponent.worldToScreen(this.monsterPos, this.screenPos);
 
-    // screenPos.z > 0 代表目標確實在相機鏡頭的前方（非轉向身後）
     if (this.screenPos.z > 0) {
         this.hpBg.style.display = 'block';
         this.hpBg.style.left = this.screenPos.x + 'px';
@@ -102,21 +113,64 @@ Monster.prototype.takeDamage = function(damage) {
     this.hp -= damage;
     console.log(`[${this.entity.name}] 受到 ${damage} 點傷害！剩餘血量: ${this.hp}`);
 
-    // 計算當前血量百分比並更新 CSS 寬度
     var hpPercent = Math.max(0, this.hp / this.maxHp) * 100;
     if (this.hpFill) {
         this.hpFill.style.width = hpPercent + '%';
     }
+
+    // 呼叫顯示跳字的方法
+    this.showDamageText(damage);
 
     if (this.hp <= 0) {
         this.die();
     }
 };
 
+Monster.prototype.showDamageText = function(damage) {
+    // 確保怪物在鏡頭前才顯示數字
+    if (this.screenPos.z > 0) {
+        var dmgElem = document.createElement('div');
+        dmgElem.className = 'damage-text';
+        dmgElem.innerText = damage; // 只顯示純數字
+        
+        // 加上一點隨機 X 軸偏移，避免連續攻擊時數字全部重疊在一起
+        var offsetX = (Math.random() - 0.5) * 30;
+        
+        dmgElem.style.left = (this.screenPos.x + offsetX) + 'px';
+        // 數字初始高度稍微比血條低一點，然後往上飄
+        dmgElem.style.top = (this.screenPos.y - 10) + 'px';
+        
+        document.body.appendChild(dmgElem);
+
+        // 配合 CSS 動畫時間 (0.8s)，動畫結束後自動把 DOM 元素清理掉
+        setTimeout(function() {
+            if (dmgElem.parentNode) {
+                dmgElem.parentNode.removeChild(dmgElem);
+            }
+        }, 800);
+    }
+};
+
+Monster.prototype.applyKnockback = function(direction, force) {
+    if (!this.entity.rigidbody) return;
+
+    // 將 Y 軸抽離，確保只有水平方向的推力
+    direction.y = 0;
+    direction.normalize();
+
+    // 稍微給一點向上的推力，讓擊退看起來更自然
+    var impulse = new pc.Vec3(
+        direction.x * force,
+        force * 0.5,
+        direction.z * force
+    );
+
+    this.entity.rigidbody.applyImpulse(impulse);
+};
+
 Monster.prototype.die = function() {
     console.log(`[${this.entity.name}] 死亡！`);
     
-    // 死亡時立即拔除血條 UI，避免殘留
     if (this.hpBg && this.hpBg.parentNode) {
         this.hpBg.parentNode.removeChild(this.hpBg);
         this.hpBg = null;

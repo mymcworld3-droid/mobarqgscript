@@ -17,6 +17,7 @@ SkillSystem.prototype.initialize = function() {
     this.currentClass = 'warrior';
     
     this.debugDrawings = [];
+    this.activeProjectiles = []; // 新增：用於管理旋風斬之類的獨立飛行物
     this.debugColor = new pc.Color(1, 0, 0, 1);
     
     this.app.on('skill:cast', this.useSkill, this);
@@ -40,9 +41,46 @@ SkillSystem.prototype.useSkill = function(skillId) {
         this.triggerVfx(skill.vfx_effect);
     }
 
-    for (var i = 0; i < skill.range_shapes.length; i++) {
-        var shape = skill.range_shapes[i];
-        this.scheduleDamageCheck(skillId, shape);
+    // 處理近戰範圍判定排程
+    if (skill.range_shapes) {
+        for (var i = 0; i < skill.range_shapes.length; i++) {
+            var shape = skill.range_shapes[i];
+            this.scheduleDamageCheck(skillId, shape);
+        }
+    }
+
+    // 處理玩家位移 (例如突進斬)
+    if (skill.player_movement) {
+        setTimeout(function() {
+            var forward = this.playerEntity.forward.clone();
+            forward.y = 0;
+            forward.normalize();
+            this.app.fire('player:dash', forward, skill.player_movement.speed, skill.player_movement.duration);
+        }.bind(this), skill.player_movement.start_time * 1000);
+    }
+
+    // 處理獨立飛行物 (例如旋風斬)
+    if (skill.projectiles) {
+        for (var p = 0; p < skill.projectiles.length; p++) {
+            var projDef = skill.projectiles[p];
+            setTimeout(function(def) {
+                var spawnPos = this.playerEntity.getPosition().clone();
+                var spawnForward = this.playerEntity.forward.clone();
+                spawnForward.y = 0;
+                spawnForward.normalize();
+                
+                this.activeProjectiles.push({
+                    skillId: skillId,
+                    position: spawnPos,
+                    forward: spawnForward,
+                    radius: def.radius,
+                    speed: def.speed,
+                    tickRate: def.tick_rate,
+                    tickTimer: 0, // 產生時立刻觸發第一次傷害
+                    lifeTimer: def.duration
+                });
+            }.bind(this, projDef), projDef.spawn_time * 1000);
+        }
     }
 
     var totalDuration = skill.cast_time + skill.recovery_time;
@@ -55,8 +93,8 @@ SkillSystem.prototype.scheduleDamageCheck = function(skillId, shape) {
     setTimeout(function() {
         if (shape.shape_type === 'fan') {
             this.checkFanCollision(skillId, shape);
-        } else {
-            console.log(`觸發判定！形狀: ${shape.shape_type}`);
+        } else if (shape.shape_type === 'box') {
+            this.checkBoxCollision(skillId, shape);
         }
     }.bind(this), shape.damage_time * 1000);
 };
@@ -64,7 +102,6 @@ SkillSystem.prototype.scheduleDamageCheck = function(skillId, shape) {
 SkillSystem.prototype.checkFanCollision = function(skillId, shape) {
     if (!this.playerEntity) return;
 
-    // 關鍵修正 3：加入 .clone()，防止修改到引擎內部共用的向量記憶體
     var playerPos = this.playerEntity.getPosition().clone();
     var playerForward = this.playerEntity.forward.clone();
     
@@ -92,13 +129,66 @@ SkillSystem.prototype.checkFanCollision = function(skillId, shape) {
         var angleRequirement = Math.cos((shape.angle / 2) * pc.math.DEG_TO_RAD);
 
         if (dotProduct >= angleRequirement) {
-            console.log(`扇形範圍命中！目標：${monster.name}`);
-            
-            if (monster.script && monster.script.monster) {
-                var targetId = monster.script.monster.monsterId;
-                var finalDamage = this.applySkillDamageToTarget(skillId, targetId);
-                monster.script.monster.takeDamage(finalDamage);
-            }
+            this.applyDamageAndEffects(skillId, monster, playerPos, shape);
+        }
+    }
+};
+
+SkillSystem.prototype.checkBoxCollision = function(skillId, shape) {
+    if (!this.playerEntity) return;
+
+    var playerPos = this.playerEntity.getPosition().clone();
+    var playerTransform = this.playerEntity.getWorldTransform();
+    var invPlayerTransform = playerTransform.clone().invert();
+
+    if (this.debugDraw) {
+        this.addDebugBox(playerTransform, shape.offset, shape.dimensions, 0.5);
+    }
+
+    var monsters = this.app.root.findByTag('monster');
+
+    for (var i = 0; i < monsters.length; i++) {
+        var monster = monsters[i];
+        var localPos = new pc.Vec3();
+        
+        // 將怪物的世界座標轉換為玩家的局部座標，方便進行完美的矩形邊界判定
+        invPlayerTransform.transformPoint(monster.getPosition(), localPos);
+
+        var halfW = shape.dimensions.width / 2;
+        var halfL = shape.dimensions.length / 2;
+
+        if (Math.abs(localPos.x - shape.offset.x) <= halfW &&
+            Math.abs(localPos.z - shape.offset.z) <= halfL) {
+            this.applyDamageAndEffects(skillId, monster, playerPos, shape);
+        }
+    }
+};
+
+SkillSystem.prototype.checkProjectileCollision = function(proj) {
+    var monsters = this.app.root.findByTag('monster');
+
+    for (var i = 0; i < monsters.length; i++) {
+        var monster = monsters[i];
+        var dist = proj.position.distance(monster.getPosition());
+        
+        if (dist <= proj.radius) {
+            // 獨立飛行物不吃擊退設定，僅觸發傷害
+            this.applyDamageAndEffects(proj.skillId, monster, proj.position, {});
+        }
+    }
+};
+
+SkillSystem.prototype.applyDamageAndEffects = function(skillId, monster, originPos, shape) {
+    if (monster.script && monster.script.monster) {
+        var targetId = monster.script.monster.monsterId;
+        var finalDamage = this.applySkillDamageToTarget(skillId, targetId);
+        
+        monster.script.monster.takeDamage(finalDamage);
+        
+        // 若該段判定帶有擊退效果
+        if (shape.knockback) {
+            var pushDir = new pc.Vec3().sub2(monster.getPosition(), originPos);
+            monster.script.monster.applyKnockback(pushDir, shape.knockback);
         }
     }
 };
@@ -118,9 +208,7 @@ SkillSystem.prototype.applySkillDamageToTarget = function(skillId, monsterId) {
     }
 
     var finalDamage = Math.max(1, rawDamage - monsterStats.defense);
-    finalDamage = Math.floor(finalDamage);
-
-    return finalDamage;
+    return Math.floor(finalDamage);
 };
 
 SkillSystem.prototype.triggerVfx = function(vfxName) {
@@ -129,18 +217,61 @@ SkillSystem.prototype.triggerVfx = function(vfxName) {
 
 SkillSystem.prototype.addDebugFan = function(center, forward, radius, angle, duration) {
     this.debugDrawings.push({
-        type: 'fan',
-        center: center,
-        forward: forward,
-        radius: radius,
-        angle: angle,
-        timer: duration
+        type: 'fan', center: center, forward: forward, radius: radius, angle: angle, timer: duration
+    });
+};
+
+SkillSystem.prototype.addDebugBox = function(transform, offset, dims, duration) {
+    this.debugDrawings.push({
+        type: 'box', transform: transform.clone(), offset: {x: offset.x, z: offset.z}, dims: {w: dims.width, l: dims.length}, timer: duration
     });
 };
 
 SkillSystem.prototype.update = function(dt) {
+    // 處理獨立飛行物 (旋風斬)
+    for (var p = this.activeProjectiles.length - 1; p >= 0; p--) {
+        var proj = this.activeProjectiles[p];
+        proj.lifeTimer -= dt;
+
+        if (proj.lifeTimer <= 0) {
+            this.activeProjectiles.splice(p, 1);
+            continue;
+        }
+
+        proj.position.add(proj.forward.clone().mulScalar(proj.speed * dt));
+
+        proj.tickTimer -= dt;
+        if (proj.tickTimer <= 0) {
+            proj.tickTimer = proj.tickRate;
+            this.checkProjectileCollision(proj);
+        }
+
+        // 即時繪製旋風斬判定範圍
+        if (this.debugDraw) {
+            var drawCenter = new pc.Vec3(proj.position.x, proj.position.y + 0.1, proj.position.z);
+            var segments = 20;
+            var step = (Math.PI * 2) / segments;
+            var prevPoint = null;
+            
+            for (var j = 0; j <= segments; j++) {
+                var angle = step * j;
+                var arcPoint = new pc.Vec3(
+                    drawCenter.x + Math.cos(angle) * proj.radius,
+                    drawCenter.y,
+                    drawCenter.z + Math.sin(angle) * proj.radius
+                );
+                if (prevPoint) {
+                    if (this.app.renderLine) this.app.renderLine(prevPoint, arcPoint, this.debugColor);
+                    else if (this.app.drawLine) this.app.drawLine(prevPoint, arcPoint, this.debugColor);
+                }
+                prevPoint = arcPoint;
+            }
+        }
+    }
+
     if (!this.debugDraw || this.debugDrawings.length === 0) return;
 
+    // 處理靜態範圍除錯線條 (三連擊、突進斬)
     for (var i = this.debugDrawings.length - 1; i >= 0; i--) {
         var dbg = this.debugDrawings[i];
         dbg.timer -= dt;
@@ -156,42 +287,63 @@ SkillSystem.prototype.update = function(dt) {
             var radius = dbg.radius;
             var angle = dbg.angle;
 
-            var segments = 20;
+            var segmentsF = 20;
             var halfAngle = angle / 2;
-            var step = angle / segments;
-            var prevPoint = null;
+            var stepF = angle / segmentsF;
+            var prevPointF = null;
 
-            var drawCenter = new pc.Vec3(center.x, center.y + 0.1, center.z);
+            var drawCenterF = new pc.Vec3(center.x, center.y + 0.1, center.z);
 
-            for (var j = 0; j <= segments; j++) {
-                var currentAngle = -halfAngle + (step * j);
+            for (var k = 0; k <= segmentsF; k++) {
+                var currentAngle = -halfAngle + (stepF * k);
                 
                 var q = new pc.Quat().setFromEulerAngles(0, currentAngle, 0);
                 var dir = new pc.Vec3();
                 q.transformVector(forward, dir);
                 
-                var arcPoint = new pc.Vec3(
-                    drawCenter.x + dir.x * radius,
-                    drawCenter.y,
-                    drawCenter.z + dir.z * radius
+                var arcPointF = new pc.Vec3(
+                    drawCenterF.x + dir.x * radius,
+                    drawCenterF.y,
+                    drawCenterF.z + dir.z * radius
                 );
 
-                if (j === 0 || j === segments) {
-                    if (this.app.renderLine) {
-                        this.app.renderLine(drawCenter, arcPoint, this.debugColor);
-                    } else if (this.app.drawLine) {
-                        this.app.drawLine(drawCenter, arcPoint, this.debugColor);
-                    }
+                if (k === 0 || k === segmentsF) {
+                    if (this.app.renderLine) this.app.renderLine(drawCenterF, arcPointF, this.debugColor);
+                    else if (this.app.drawLine) this.app.drawLine(drawCenterF, arcPointF, this.debugColor);
                 }
 
-                if (prevPoint) {
-                    if (this.app.renderLine) {
-                        this.app.renderLine(prevPoint, arcPoint, this.debugColor);
-                    } else if (this.app.drawLine) {
-                        this.app.drawLine(prevPoint, arcPoint, this.debugColor);
-                    }
+                if (prevPointF) {
+                    if (this.app.renderLine) this.app.renderLine(prevPointF, arcPointF, this.debugColor);
+                    else if (this.app.drawLine) this.app.drawLine(prevPointF, arcPointF, this.debugColor);
                 }
-                prevPoint = arcPoint;
+                prevPointF = arcPointF;
+            }
+        } else if (dbg.type === 'box') {
+            var t = dbg.transform;
+            var off = dbg.offset;
+            var d = dbg.dims;
+            var hw = d.w / 2;
+            var hl = d.l / 2;
+
+            var cornersLocal = [
+                new pc.Vec3(off.x - hw, 0.1, off.z - hl),
+                new pc.Vec3(off.x + hw, 0.1, off.z - hl),
+                new pc.Vec3(off.x + hw, 0.1, off.z + hl),
+                new pc.Vec3(off.x - hw, 0.1, off.z + hl)
+            ];
+
+            var cornersWorld = cornersLocal.map(function(p) {
+                var w = new pc.Vec3();
+                t.transformPoint(p, w);
+                w.y = t.getTranslation().y + 0.1;
+                return w;
+            });
+
+            for (var m = 0; m < 4; m++) {
+                var p1 = cornersWorld[m];
+                var p2 = cornersWorld[(m + 1) % 4];
+                if (this.app.renderLine) this.app.renderLine(p1, p2, this.debugColor);
+                else if (this.app.drawLine) this.app.drawLine(p1, p2, this.debugColor);
             }
         }
     }
