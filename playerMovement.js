@@ -70,9 +70,16 @@ PlayerMovement.prototype.update = function(dt) {
             
             var currentSpeed = this.speed * pushStrength;
             
-            var targetPos = new pc.Vec3().add2(this.entity.getPosition(), this.moveDir);
-            this.entity.lookAt(targetPos);
-            this.entity.rigidbody.teleport(this.entity.getPosition(), this.entity.getRotation());
+            // 計算目標角度與當前角度的差值
+            var targetAngle = Math.atan2(this.moveDir.x, this.moveDir.z) * pc.math.RAD_TO_DEG;
+            var currentAngle = this.entity.getEulerAngles().y;
+            
+            var diff = targetAngle - currentAngle;
+            while (diff < -180) diff += 360;
+            while (diff > 180) diff -= 360;
+            
+            // 使用角速度來平滑轉向，取代原本的 teleport 避免破壞物理碰撞快取
+            this.entity.rigidbody.angularVelocity = new pc.Vec3(0, diff * 15 * pc.math.DEG_TO_RAD, 0);
             
             var targetVelocity = new pc.Vec3(
                 this.moveDir.x * currentSpeed,
@@ -80,10 +87,11 @@ PlayerMovement.prototype.update = function(dt) {
                 this.moveDir.z * currentSpeed
             );
             this.entity.rigidbody.linearVelocity = targetVelocity;
+        } else {
+            this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
         }
     } else {
         this.entity.rigidbody.linearVelocity = new pc.Vec3(0, safeYVelocity, 0);
+        this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
     }
-    
-    this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
 };
