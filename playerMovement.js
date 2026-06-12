@@ -70,16 +70,21 @@ PlayerMovement.prototype.update = function(dt) {
             
             var currentSpeed = this.speed * pushStrength;
             
-            // 計算目標角度與當前角度的差值
-            var targetAngle = Math.atan2(this.moveDir.x, this.moveDir.z) * pc.math.RAD_TO_DEG;
+            // 修正方向：PlayCanvas 的前方是 -Z 軸，加上負號來對齊 3D 座標系
+            var targetAngle = Math.atan2(-this.moveDir.x, -this.moveDir.z) * pc.math.RAD_TO_DEG;
             var currentAngle = this.entity.getEulerAngles().y;
             
             var diff = targetAngle - currentAngle;
             while (diff < -180) diff += 360;
             while (diff > 180) diff -= 360;
             
-            // 使用角速度來平滑轉向，取代原本的 teleport 避免破壞物理碰撞快取
-            this.entity.rigidbody.angularVelocity = new pc.Vec3(0, diff * 15 * pc.math.DEG_TO_RAD, 0);
+            // 修正擺動：加入死區，角度差異小於 2 度就停止施加旋轉力道
+            if (Math.abs(diff) < 2.0) {
+                this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
+            } else {
+                // 將轉向倍率調低至 10，讓旋轉平滑且不會超調
+                this.entity.rigidbody.angularVelocity = new pc.Vec3(0, diff * 10 * pc.math.DEG_TO_RAD, 0);
+            }
             
             var targetVelocity = new pc.Vec3(
                 this.moveDir.x * currentSpeed,
