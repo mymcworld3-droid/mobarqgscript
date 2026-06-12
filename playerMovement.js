@@ -11,6 +11,11 @@ PlayerMovement.prototype.initialize = function() {
     this.dashTimer = 0;
     this.dashVelocity = new pc.Vec3();
 
+    // 鎖定物理旋轉：將角速度影響因子設為 0，徹底防止撞擊怪物或牆壁產生的外力擺動
+    if (this.entity.rigidbody) {
+        this.entity.rigidbody.angularFactor = pc.Vec3.ZERO;
+    }
+
     this.app.on('joystick:move', this.onJoystickMove, this);
     this.app.on('joystick:end', this.onJoystickEnd, this);
     this.app.on('player:dash', this.onDash, this);
@@ -43,7 +48,6 @@ PlayerMovement.prototype.update = function(dt) {
             safeYVelocity,
             this.dashVelocity.z
         );
-        this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
         return; // 跳過搖桿控制
     }
 
@@ -70,21 +74,11 @@ PlayerMovement.prototype.update = function(dt) {
             
             var currentSpeed = this.speed * pushStrength;
             
-            // 修正方向：PlayCanvas 的前方是 -Z 軸，加上負號來對齊 3D 座標系
-            var targetAngle = Math.atan2(-this.moveDir.x, -this.moveDir.z) * pc.math.RAD_TO_DEG;
-            var currentAngle = this.entity.getEulerAngles().y;
+            var targetPos = new pc.Vec3().add2(this.entity.getPosition(), this.moveDir);
+            this.entity.lookAt(targetPos);
             
-            var diff = targetAngle - currentAngle;
-            while (diff < -180) diff += 360;
-            while (diff > 180) diff -= 360;
-            
-            // 修正擺動：加入死區，角度差異小於 2 度就停止施加旋轉力道
-            if (Math.abs(diff) < 2.0) {
-                this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
-            } else {
-                // 將轉向倍率調低至 10，讓旋轉平滑且不會超調
-                this.entity.rigidbody.angularVelocity = new pc.Vec3(0, diff * 10 * pc.math.DEG_TO_RAD, 0);
-            }
+            // 使用 syncEntityToBody 取代 teleport，只同步方向而不清空物理動能，解決越走越慢的問題
+            this.entity.rigidbody.syncEntityToBody();
             
             var targetVelocity = new pc.Vec3(
                 this.moveDir.x * currentSpeed,
@@ -92,11 +86,8 @@ PlayerMovement.prototype.update = function(dt) {
                 this.moveDir.z * currentSpeed
             );
             this.entity.rigidbody.linearVelocity = targetVelocity;
-        } else {
-            this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
         }
     } else {
         this.entity.rigidbody.linearVelocity = new pc.Vec3(0, safeYVelocity, 0);
-        this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
     }
 };
